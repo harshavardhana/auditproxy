@@ -1,4 +1,4 @@
-module github.com/minio/auditproxy
+module github.com/harshavardhana/auditproxy
 
 go 1.15
 

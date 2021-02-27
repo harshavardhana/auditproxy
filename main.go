@@ -8,7 +8,9 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -58,17 +60,21 @@ func ParsePublicCertFile(certFile string) (x509Certs []*x509.Certificate, err er
 }
 
 var (
-	caCert      string
-	tlsDir      string
-	backendHost string
+	caCert       string
+	tlsDir       string
+	backendURL   string
+	port         int
+	tlsHardening bool
 
 	globalDNSCache *xhttp.DNSCache
 )
 
 func init() {
-	flag.StringVar(&tlsDir, "tls-dir", "/etc/auditproxy/tls", "TLS certificate directories")
-	flag.StringVar(&caCert, "ca-cert", "/etc/auditproxy/ca.crt", "CA certificates")
-	flag.StringVar(&backendHost, "backend-host", "play.min.io", "Backend host to proxy to")
+	flag.StringVar(&tlsDir, "tls-dir", "", "TLS certificate directories")
+	flag.StringVar(&caCert, "ca-cert", "", "CA certificates")
+	flag.StringVar(&backendURL, "backend-url", "https://play.min.io", "Backend host to proxy to")
+	flag.IntVar(&port, "port", 9000, "Bind port")
+	flag.BoolVar(&tlsHardening, "tls-hardening", true, "Harden TLS in the server side")
 
 	logger.RegisterError(config.FmtError)
 	globalDNSCache = xhttp.NewDNSCache(3*time.Second, 10*time.Second, logger.LogOnceIf)
@@ -171,8 +177,6 @@ func main() {
 		logger.FatalIf(err, "Unable to parse public cert")
 	}
 
-	secureBackend := len(caCert) > 0
-
 	rootCAs, _ := x509.SystemCertPool()
 	if rootCAs == nil {
 		// In some systems (like Windows) system cert pool is
@@ -187,30 +191,36 @@ func main() {
 	}
 
 	transport := newInternodeHTTPTransport(&tls.Config{
-		RootCAs:    rootCAs,
-		NextProtos: []string{"http/1.1"},
-		// TLS hardening
+		RootCAs:                  rootCAs,
+		NextProtos:               []string{"http/1.1"},
 		MinVersion:               tls.VersionTLS12,
 		CipherSuites:             secureCipherSuites,
 		CurvePreferences:         secureCurves,
 		PreferServerCipherSuites: true,
 	}, rest.DefaultTimeout)()
 
+	backendHost, err := url.Parse(backendURL)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
 	r := mux.NewRouter()
 	s := &http.Server{
-		Handler:        tracer{proxy{r, secureBackend, backendHost, transport}},
-		Addr:           ":8443",
+		Handler:        tracer{proxy{r, backendHost.Scheme == "https", backendHost.Host, transport}},
+		Addr:           fmt.Sprintf(":%d", port),
 		MaxHeaderBytes: 1 << 20,
 	}
 	if len(certs) > 0 {
 		s.TLSConfig = &tls.Config{
-			// TLS hardening
-			PreferServerCipherSuites: true,
-			MinVersion:               tls.VersionTLS12,
-			NextProtos:               []string{"http/1.1"},
-			Certificates:             certs,
-			CipherSuites:             secureCipherSuites,
-			CurvePreferences:         secureCurves,
+			NextProtos:   []string{"http/1.1"},
+			Certificates: certs,
+		}
+		// TLS hardening enabled by default
+		if tlsHardening {
+			s.TLSConfig.PreferServerCipherSuites = true
+			s.TLSConfig.MinVersion = tls.VersionTLS12
+			s.TLSConfig.CipherSuites = secureCipherSuites
+			s.TLSConfig.CurvePreferences = secureCurves
 		}
 		logger.FatalIf(s.ListenAndServeTLS("", ""), "Unable to start HTTPS service")
 	} else {
