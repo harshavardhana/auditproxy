@@ -2,14 +2,14 @@
 Trace and Audit HTTP calls
 
 ### Usage
-Trace all HTTP calls to `backend-host`
+Trace all HTTP calls to `backend-url`
 
 ```
-./auditproxy -backend-host play.min.io:9000
+./auditproxy -backend-url https://play.min.io:9000
 ```
 
 ```
-~ mc alias set audit http://localhost:8443 <access_key> <secret_key> --api s3v4
+~ mc alias set audit http://localhost:9000 <access_key> <secret_key> --api s3v4
 ~ mc ls audit/testbucket/
 [2021-02-25 12:04:27 PST]  1KiB hosts
 [2021-02-26 10:19:26 PST]  2KiB issue
