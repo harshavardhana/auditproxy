@@ -10,12 +10,15 @@ builds:
   -
     goos:
       - linux
+      - darwin
+      - windows
     goarch:
       - amd64
     env:
       - CGO_ENABLED=0
     flags:
       - -trimpath
+      - --tags=kqueue
     ldflags:
       - -s -w
 
